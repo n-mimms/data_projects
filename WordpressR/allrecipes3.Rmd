@@ -1,0 +1,34 @@
+---
+title: 'AllRecipes 3: More ingredients handling'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+
+zz$brown_string <-  str_extract(zz$brown_sugar, "[A-Z]+" )  #sub("^([[:alpha:]]*).*", "\\1", x)
+zz$brown_string <-  zz$brown_sugar %>% clean_unicode_fractions() %>% str_replace_all("[:digit:]+", "")  %>% str_replace_all("[:punct:]+", "")%>% remove_units() %>% trimws() 
+zz$flour_string <- zz$flour %>% clean_recipe_string()
+
+remove_units <- function(x){
+  x <- as.character(x)
+  units <- c("cups","cup")
+  x <- str_replace_all(x, paste0(units, collapse = "|"), "")
+  return(x)
+}
+
+clean_recipe_string <- function(x){
+  x <- as.character(x)
+  x <- x %>% clean_unicode_fractions() %>% str_replace_all("[:digit:]+", "")  %>% str_replace_all("[:punct:]+", "")%>% remove_units() %>% trimws() 
+  return(x)
+}
+
+#get the most common ingredients among the list of dataframes (ingredients)
+h <- ingredients[[1]]
+
+
+```

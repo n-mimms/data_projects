@@ -1,0 +1,188 @@
+---
+title: "AllRecipes.com Recipe Parser"
+output:
+  html_document:
+    theme: readable
+    highlight: tango
+---
+
+
+This post tests out web scraping using the R package [rvest](https://cran.r-project.org/web/packages/rvest/rvest.pdf). We will scrape allrecipes.com and create two functions: 
+
+- The first function will accept a vector of keywords (e.g. c("banana","muffins")) and a number of search pages to look over (each search page containing 20 recipes). It will return a vector with N*20 recipe URLs that are relevant to the keywords.
+- The second function will accept a recipe url and return a list of ingredients. This function can be iterated over the first function to generate ingredients lists for a certain recipe type.
+
+
+Libraries used:
+
+
+```{r, warning = FALSE, message = F}
+
+# data wrangling
+library(tidyverse)  
+# html parser  
+library(rvest)    
+# string stuff
+library(stringr)   
+# pipes
+library(magrittr)
+
+```
+
+
+
+#Parsing a single recipe page
+
+Using the library **rvest** to pick up every html div. This code chunk tests out a single scrape of a recipe page, first getting all elements, then isolating the node *.ingredients-items* to pick up only the ingredients list. This process required Inspecting the html code of the page to know which nodes are interesting.
+
+
+```{r}
+
+#scrapes XML document:
+scraping_test <- read_html("https://www.allrecipes.com/recipe/10331/moms-chocolate-chip-cookies/")
+
+##Get ingredients: 
+recipe_data <- scraping_test %>%
+  html_nodes('.ingredients-item') %>%    
+  html_text() %>% trimws() 
+
+```
+
+
+#Parsing a recipe search page
+
+We can also test out a single scrape of one of the search pages for AllRecipes url (*/search/results/* plus search terms).
+
+
+```{r}
+
+meta_search <- read_html("https://www.allrecipes.com/search/results/?wt=chocolate%20chip%20cookies&sort=re")
+#https://www.allrecipes.com/search/results/?wt=chocolate%20chip%20cookies&sort=re&page=2   #Url for second page of search
+
+relevant_titles <- meta_search %>%
+  html_nodes(".fixed-recipe-card__h3")  %>%
+  html_text() %>% trimws()
+
+relevant_urls <- meta_search %>%
+  html_nodes(".fixed-recipe-card__h3") %>% 
+  html_nodes("a") %>% html_attr("href") %>% trimws()
+
+#combine titles and urls in a dataframe:
+title_and_url <- data.frame(title = relevant_titles, 
+                            url = relevant_urls)
+
+#View first rows
+knitr::kable(head(title_and_url))
+
+```
+
+
+#Creating a function to return relevant recipe urls
+
+Now that we've explored how to make a dataframe from one AllRecipes search page, we can create a function to wrap it all together. The function will accept as inputs a vector of search terms (e.g. *c("chocolate","chip","cookies")*) and how many search pages to return (each earch page having 20 recipes). The function will return as output a vector of urls of relevant recipes.
+
+
+```{r}
+
+#Given a vector of search terms, return (20*N) relevant recipe urls as a data frame: 
+relevant_url_finder <- function(searchTerms, N){
+  
+  #Create the search url from given search terms:
+  #split the search terms by the separator used on AllRecipes
+  searched <- paste0(searchTerms, collapse = "%20")
+  #collect the N urls for the search pages and store as a vector
+  meta_urls <- vector(mode="character", length=N)
+  for (i in 1:N){
+    if (i ==1){
+      meta_urls[i] <- paste0("https://www.allrecipes.com/search/results/?wt=", searched, "&sort=re")
+    } else {
+      meta_urls[i] <- paste0("https://www.allrecipes.com/search/results/?wt=", searched, "&sort=re","&page=", i)
+    }
+  }
+  
+  #For each of the N search pages, gather the 20 urls into a vector. each N page is a separate term in N-length list
+  #initialize a list to store the N results
+  url_vector_list <- vector(mode = "list", length = N)
+  #counter/index of our list to fill
+  nm <- 1
+  #loop over the search page (meta) url vector, gathering all recipe urls from the search page 
+  for (metaurl in meta_urls){
+    metascrape <- read_html(metaurl)
+    #store 20 recipe urls as the Nth item of the list
+    url_vector_list[[nm]] <- metascrape %>% 
+      html_nodes(".fixed-recipe-card__h3") %>% 
+      html_nodes("a") %>% html_attr("href") %>% trimws()
+    #increase index
+    nm <- nm + 1
+    #sleep for a period
+    Sys.sleep(4)
+  }
+  
+  #unlist the N 20-string long vectors and combine into a 20*N size vector of urls to relevant recipes
+  url_vector <- unlist(url_vector_list)
+  return(url_vector)
+}
+
+```
+
+Now we can test out the "relevant recipe url finder" function:
+
+```{r}
+
+#Sample usage:
+cookie_urls <- relevant_url_finder(c("chocolate","chip","cookies"), N = 5)
+knitr::kable(cookie_urls)
+
+```
+
+Output looks good, except for maybe the Tahini Chocolate Chip Cookies. Something went wrong there for sure.
+
+#Creating a function to return ingredients from a recipe url
+
+Lastly, we want to write a function that accepts an AllRecipes recipe url and returns an ingredients list. Wrapping the example above into a function that accepts as input a recipe url and returns a vector of ingredients for that particular recipe, we get:
+
+```{r}
+
+#Return ingredients list, given a single recipe url
+get_ingredients_from_url <- function(given_url){
+  scraping_recipe <- read_html(given_url)
+  recipe_data <- scraping_recipe %>%
+    html_nodes('.ingredients-item') %>%    
+    html_text() %>% trimws()
+  #return vector of ingredients
+  return(recipe_data)
+}
+
+```
+
+We test out the function, creating a list in a loop, where each element of the list contains a dataframe of the recipe's ingredients.
+
+```{r}
+
+#Sample usage:
+#Run in a loop
+ingredients <- list() #initialize list
+i <- 1     #index/counter
+#For cookies in the list of urls, store the ingredients in list
+for (urls in cookie_urls){
+  ingredients[[i]] <- get_ingredients_from_url(cookie_urls[i])
+  i <- i+1
+  Sys.sleep(2)
+}
+
+
+```
+
+
+Now we have a list of list of ingredients. Sample ouput:
+
+```{r}
+
+knitr::kable(ingredients[[12]])
+
+```
+
+
+I'll do some things with this output later.
+
+

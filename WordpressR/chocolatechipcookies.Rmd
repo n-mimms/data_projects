@@ -1,0 +1,184 @@
+---
+title: "AllRecipes 2: Isolating Ingredients"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+This post continues using the AllRecipes recipe parser from the previous post.
+
+
+Libraries used:
+
+
+```{r, warning = FALSE, message = F}
+
+# data wrangling
+library(tidyverse)  
+# string stuff
+library(stringr)   
+# pipes
+library(magrittr)
+# plots
+library(ggplot2)
+```
+
+
+#Isolating a single ingredient across recipes
+
+First we try to isolate a single ingredient, here "brown sugar", so that we might compare the related (chocolate chip cookie) recipes later:
+
+```{r}
+
+#initialize a vector the length of the ingredients list-of-ingredients lists to store a single ingredient
+brown_sugar <- vector(mode="character", length=length(ingredients))
+
+#loop over the list-of-ingredients lists
+for (i in 1:length(ingredients)){
+  #on each individual ingredients 
+  z <- ingredients[[i]]
+  #isolate the single ingredient of interest
+  bs <- z[grepl("brown sugar", z)]
+  #if no ingredient of interest is found, an empty character will be returned
+  #change the empty character to string "missing"
+  brown_sugar[i] <-  ifelse(identical(bs, character(0)), "missing",bs)
+}
+brown_sugar
+
+```
+
+Now that we've seen one way to isolate an ingredient, we can turn it into a function that takes as input an ingredient string (e.g. "egg") and the list-of-ingredients lists (the list *ingredients* from before; it's actually an N-length list of many character vectors). This function returns an N-length character vector of the ingredient and quantity that matches the input ingredient. 
+
+```{r}
+
+#takes as input list of N dataframes of ingredients, and a single ingredient to search for; 
+#returns N-length vector of (first match) given ingredient to search for
+single_ingredient <- function(ingredientlist_list, single_ingredient){
+  single_ingredient %<>% as.character()
+  ingred <- vector(mode="character", length=length(ingredientlist_list))
+  for (i in 1:length(ingredientlist_list)){
+    z <- ingredientlist_list[[i]]    #pick the recipe character list to search over
+    bs <- z[grepl(single_ingredient, z)]  #isolate the ingredient 
+    ingred[i] <-  ifelse(identical(bs, character(0)), "missing",bs)
+  }
+  return(ingred)
+}
+
+egg_test <- single_ingredient(ingredients, "egg")
+knitr::kable(egg_test[1:12])
+
+```
+
+We can then use this function to create a data frame with multiple ingredients:
+
+```{r}
+
+#create data frame of 
+z <- data.frame(brown_sugar = single_ingredient(ingredients, "brown sugar"),
+                white_sugar = single_ingredient(ingredients, "white sugar"),
+                egg = single_ingredient(ingredients, "egg"),
+                flour = single_ingredient(ingredients, "flour"))
+#turn into characters
+z[] <- lapply(z, as.character)
+
+#view view few rows
+knitr::kable(z[1:5,])
+
+```
+
+The unicode fractions will cause trouble, so we can write a function to replace them all
+
+```{r}
+
+clean_unicode_fractions <- function(x){
+  x <- as.character(x)
+  x <- gsub("⅛", ".125", x)
+  x <- gsub("¼", ".25", x)
+  x <- gsub("½", ".5", x)
+  x <- gsub("¾", ".75", x)
+  x <- gsub("<U+2009>", "", x) #remove small unicode space
+  x <- gsub("\u2009", "", x) #remove small unicode space
+  x <- gsub("\u2153", ".333", x) #remove unicode 1/3
+  x <- gsub("\u2154", ".667", x) #remove unicode 2/3
+  x <- ifelse(startsWith(x, "."), paste0("0",x),x)  #if fraction starts with point, add leading 0
+  return(x)
+}
+
+```
+
+We use this new unicode-function to clean and extract values from the two sugars ingredients columns:
+
+```{r}
+
+#Create columns that store value-only for amounts
+z$w_sugar_amt <- z$white_sugar %>% clean_unicode_fractions() %>% 
+  str_extract("\\d+\\.*\\d*") %>% as.numeric()
+z$b_sugar_amt <- z$brown_sugar %>% clean_unicode_fractions() %>% 
+  str_extract("\\d+\\.*\\d*") %>% as.numeric()
+
+
+#view view few rows
+knitr::kable(z[1:15,])
+
+```
+
+We can see a potential problem: the function does not care about units, so "2 tablespoons of sugar" and "2 cups of sugar" will both return a 2. An easy way to get around this is to limit our recipes to only those who use "cup" as the measurement in both sugars columns. Using *dplyr*s filter as below will also only keep recipes that have both brown and white sugars:
+
+```{r}
+
+#Keep complete recipes:
+zz <- filter(z, grepl("cup", brown_sugar)& grepl("cup", white_sugar))
+
+```
+
+We can do a basic scatter plot using ggplot of the amounts of white-versus-brown sugar in chocolate chip cookie recipes. Note that overplotting (points on top of points) is a problem with this data set, so we can use the "position_jitter" option and set a transparency alpha so that we can get an idea of how many recipes use the most common ratios (for instance, the classic 0.75-0.75 cup white-brown sugar ratio of the original Nestle Tollhouse recipe).
+
+```{r}
+
+#Plots
+ggplot(zz, aes(x=b_sugar_amt, y=w_sugar_amt)) + 
+  geom_point(position = position_jitter(h= 0.025, w = 0.025), alpha = 0.3, size = 2) + 
+  geom_abline(slope = 1) + 
+  ggtitle("Brown vs. White Sugar in Choc. Chip Cookie Recipes") +
+  xlab("Brown Sugar (cups)") +
+  ylab("White Sugar (cups)")+ 
+  coord_fixed(ratio = 1, xlim = NULL, ylim = NULL, expand = TRUE, clip = "on")
+
+```
+
+We can also create a ratio of the two sugars and graph that:
+
+```{r}
+
+zz$sugar_ratio <- zz$b_sugar_amt / zz$w_sugar_amt
+hist(zz$sugar_ratio, n = 50, 
+     main ="Sugar Ratio", 
+     xlab = "Ratio of white:brown sugar")
+
+```
+
+
+```{r, eval =  F, echo = F}
+
+fig <- plot_ly(type = 'scatter', mode = 'markers') 
+fig <- fig %>%
+  add_trace(
+    x = z$b_sugar_amt, 
+    y = z$w_sugar_amt, 
+    marker = list(color='green'),
+    hoverinfo = z$brown_sugar,
+    showlegend = F
+  ) 
+fig <- fig %>%
+  layout(
+    title = "Sugar in Cookie recipes",
+    xaxis = list(zeroline = F),
+    yaxis = list(hoverformat = '.2f'))
+
+fig
+
+```
+
